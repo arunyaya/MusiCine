@@ -130,7 +130,12 @@ ${(parsedBody.messages || []).map(m => `${m.role.toUpperCase()}: ${m.content}`).
   const fullPath = path.join(__dirname, filePath);
   const ext = path.extname(fullPath).toLowerCase();
   const mimeType = MIME_TYPES[ext] || "application/octet-stream";
-  
+
+  fs.readFile(fullPath, (err, data) => {
+    if (err) { res.writeHead(404); res.end(`File not found: ${filePath}`); return; }
+    res.writeHead(200, { "Content-Type": mimeType });
+    res.end(data);
+  });
 });
 
 server.listen(PORT, () => {

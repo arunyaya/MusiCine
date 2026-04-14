@@ -1,89 +1,3 @@
-// ══════════════════════════════════════════════════════════════════════════════
-// ─── ES6 CLASSES ─────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════════════════════
-
-class Song {
-  constructor({ title, artist, url, cover = "", file = null, type = "local", videoId = "", thumb = "" }) {
-    this.title   = title  || "Unknown Title";
-    this.artist  = artist || "Unknown Artist";
-    this.url     = url    || "";
-    this.cover   = cover;
-    this.file    = file;
-    this.type    = type;
-    this.videoId = videoId;
-    this.thumb   = thumb;
-    this.addedAt = Date.now();
-  }
-  getDisplayTitle()  { return this.title; }
-  getDisplayArtist() { return this.artist; }
-  isLocal()     { return this.type === "local"; }
-  isYouTube()   { return this.type === "yt"; }
-}
-
-class Playlist {
-  constructor(name, icon = "🎵") {
-    this.name      = name;
-    this.icon      = icon;
-    this.tracks    = [];
-    this.createdAt = Date.now();
-  }
-  addTrack(track) {
-    const dup = this.tracks.some(t =>
-      (t.type === "yt"    && t.videoId === track.videoId) ||
-      (t.type === "local" && t.index   === track.index)
-    );
-    if (!dup) this.tracks.push(track);
-  }
-  removeTrack(pos) { this.tracks.splice(pos, 1); }
-  shuffle() {
-    for (let i = this.tracks.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [this.tracks[i], this.tracks[j]] = [this.tracks[j], this.tracks[i]];
-    }
-  }
-  sortByTitle()  { this.tracks.sort((a, b) => (a.title  || "").localeCompare(b.title  || "")); }
-  sortByArtist() { this.tracks.sort((a, b) => (a.artist || "").localeCompare(b.artist || "")); }
-  get length()   { return this.tracks.length; }
-}
-
-class User {
-  constructor(name = "Guest") {
-    this.name      = name;
-    this.library   = [];   // Song instances
-    this.playlists = {};   // { [name]: Playlist }
-    this.history   = [];
-  }
-  addSong(song) {
-    if (!(song instanceof Song)) throw new Error("Must be a Song instance");
-    this.library.push(song);
-  }
-  removeSong(index) { this.library.splice(index, 1); }
-  addPlaylist(pl) {
-    if (!(pl instanceof Playlist)) throw new Error("Must be a Playlist instance");
-    this.playlists[pl.name] = pl;
-  }
-  getSortedLibrary(by = "recent") {
-    const copy = [...this.library];
-    if (by === "title")  return copy.sort((a, b) => a.title.localeCompare(b.title));
-    if (by === "artist") return copy.sort((a, b) => a.artist.localeCompare(b.artist));
-    return copy; // "recent" = insertion order
-  }
-  addToHistory(title) {
-    this.history.unshift(title);
-    if (this.history.length > 50) this.history.pop();
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ─── GLOBAL INSTANCE
-// ══════════════════════════════════════════════════════════════════════════════
-
-const currentUser = new User("Guest");
-
-// Transparent aliases so all existing code using `songs` / `playlists` still works
-Object.defineProperty(window, "songs",     { get: () => currentUser.library });
-Object.defineProperty(window, "playlists", { get: () => currentUser.playlists });
-
 // ─── YouTube IFrame Player ────────────────────────────────────────────────────
 let ytPlayer = null;
 let ytReady = false;
@@ -153,7 +67,6 @@ function playYouTubeVideo(videoId, title, artist, thumb) {
   durationEl.textContent = "0:00";
   ytPlayer.loadVideoById(videoId);
   setPlaying();
-  currentUser.addToHistory(title);
   updateSongList();
 }
 
@@ -260,13 +173,14 @@ const volumeSlider = document.getElementById("volume");
 const playBtn = document.getElementById("play");
 
 // ─── State ────────────────────────────────────────────────────────────────────
+let songs = [];
+let playlists = {};
 let currentPlaylist = null;
 let currentPlaylistPos = 0;
 let songIndex = 0;
 let isShuffled = false;
 let isRepeat = false;
 let shuffleOrder = [];
-let librarySortOrder = "recent";
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function showToast(msg) {
@@ -297,7 +211,6 @@ function loadSong(index) {
   progress.style.width = "0%";
   currentTimeEl.textContent = "0:00";
   durationEl.textContent = "0:00";
-  currentUser.addToHistory(song.title);
   updateSongList();
 }
 
@@ -314,10 +227,10 @@ function readTags(file, url) {
             b64 += String.fromCharCode(tags.picture.data[i]);
           cover = `data:${tags.picture.format};base64,${btoa(b64)}`;
         }
-        resolve(new Song({ title: tags.title || file.name.replace(/\.[^.]+$/, ""), artist: tags.artist || "Unknown Artist", url, cover, file }));
+        resolve({ name: file.name.replace(/\.[^.]+$/, ""), url, title: tags.title || file.name.replace(/\.[^.]+$/, ""), artist: tags.artist || "Unknown Artist", cover, file });
       },
       onError() {
-        resolve(new Song({ title: file.name.replace(/\.[^.]+$/, ""), artist: "Unknown Artist", url, cover: "", file }));
+        resolve({ name: file.name.replace(/\.[^.]+$/, ""), url, title: file.name.replace(/\.[^.]+$/, ""), artist: "Unknown Artist", cover: "", file });
       },
     });
   });
@@ -330,7 +243,7 @@ document.getElementById("upload-input").addEventListener("change", async (e) => 
   for (const file of files) {
     const url = URL.createObjectURL(file);
     const song = await readTags(file, url);
-    currentUser.addSong(song);
+    songs.push(song);
   }
   if (wasEmpty && songs.length) loadSong(0);
   updateSongList();
@@ -405,22 +318,11 @@ audio.addEventListener("ended", () => {
   nextSong();
 });
 
-// ✅ Shuffle — persistent toggle with proper order
 document.getElementById("shuffle-btn").addEventListener("click", () => {
   isShuffled = !isShuffled;
   document.getElementById("shuffle-btn").classList.toggle("active", isShuffled);
-  if (isShuffled) {
-    const indices = [...songs.keys()].filter(i => i !== songIndex);
-    for (let i = indices.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [indices[i], indices[j]] = [indices[j], indices[i]];
-    }
-    shuffleOrder = [songIndex, ...indices];
-    showToast("🔀 Shuffle on");
-  } else {
-    shuffleOrder = [];
-    showToast("Shuffle off");
-  }
+  if (isShuffled) { shuffleOrder = [...songs.keys()].sort(() => Math.random() - 0.5); showToast("Shuffle on"); }
+  else showToast("Shuffle off");
 });
 
 document.getElementById("repeat-btn").addEventListener("click", () => {
@@ -476,22 +378,7 @@ function updateSongList() {
   if (currentPlaylist && playlists[currentPlaylist]) {
     const pl = playlists[currentPlaylist];
     panelTitle.textContent = `${pl.icon || "♫"} ${currentPlaylist}`;
-
-    // ✅ Sort bar for playlist
-    listEl.insertAdjacentHTML("beforeend", `
-      <div class="sort-bar">
-        <span class="sort-label">Sort:</span>
-        <button class="sort-btn" data-plsort="title">Title</button>
-        <button class="sort-btn" data-plsort="artist">Artist</button>
-      </div>`);
-    listEl.querySelectorAll(".sort-btn[data-plsort]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        btn.dataset.plsort === "title" ? pl.sortByTitle() : pl.sortByArtist();
-        updateSongList(); showToast(`Sorted by ${btn.dataset.plsort}`);
-      });
-    });
-
-    if (!pl.tracks.length) { listEl.insertAdjacentHTML("beforeend", `<div class="song-list-empty">No songs in this playlist.</div>`); return; }
+    if (!pl.tracks.length) { listEl.innerHTML = `<div class="song-list-empty">No songs in this playlist.</div>`; return; }
     pl.tracks.forEach((track, idx) => {
       const isActive = idx === currentPlaylistPos;
       const title = track.type === "local" ? (songs[track.index]?.title || "Unknown") : track.title;
@@ -500,23 +387,14 @@ function updateSongList() {
       const div = document.createElement("div");
       div.className = "song-item" + (isActive ? " active" : "");
       div.innerHTML = `
-        <div class="song-item-info" style="flex:1;display:flex;align-items:center;gap:10px;overflow:hidden">
+        <div class="song-item-info">
           <span class="song-item-num">${isActive ? "▶" : idx + 1}</span>
           <div style="overflow:hidden;min-width:0">
             <div class="song-item-title" style="display:flex;align-items:center;gap:4px">${title}${badge}</div>
             <div class="song-item-artist">${artist}</div>
           </div>
-        </div>
-        <button class="song-remove-btn" title="Remove">✕</button>`;
-      div.querySelector(".song-item-info").addEventListener("click", () => { currentPlaylistPos = idx; playTrack(track); updateSongList(); });
-      // ✅ Remove from playlist
-      div.querySelector(".song-remove-btn").addEventListener("click", (e) => {
-        e.stopPropagation();
-        pl.removeTrack(idx);
-        if (currentPlaylistPos >= pl.tracks.length) currentPlaylistPos = Math.max(0, pl.tracks.length - 1);
-        updateSongList(); renderAllPlaylists();
-        showToast("Removed from playlist");
-      });
+        </div>`;
+      div.addEventListener("click", () => { currentPlaylistPos = idx; playTrack(track); updateSongList(); });
       listEl.appendChild(div);
     });
     return;
@@ -524,44 +402,18 @@ function updateSongList() {
 
   panelTitle.textContent = "♫ Your Library";
   if (!songs.length) { listEl.innerHTML = `<div class="song-list-empty">No local songs yet. Upload or search YouTube! 🎵</div>`; return; }
-
-  // ✅ Sort bar for library
-  listEl.insertAdjacentHTML("beforeend", `
-    <div class="sort-bar">
-      <span class="sort-label">Sort:</span>
-      <button class="sort-btn ${librarySortOrder === "recent" ? "active" : ""}" data-sort="recent">Recent</button>
-      <button class="sort-btn ${librarySortOrder === "title"  ? "active" : ""}" data-sort="title">Title</button>
-      <button class="sort-btn ${librarySortOrder === "artist" ? "active" : ""}" data-sort="artist">Artist</button>
-    </div>`);
-  listEl.querySelectorAll(".sort-btn[data-sort]").forEach(btn => {
-    btn.addEventListener("click", () => { librarySortOrder = btn.dataset.sort; updateSongList(); });
-  });
-
-  const sorted = currentUser.getSortedLibrary(librarySortOrder);
-  sorted.forEach((song) => {
-    const origIdx = songs.indexOf(song);
+  songs.forEach((song, idx) => {
     const div = document.createElement("div");
-    div.className = "song-item" + (origIdx === songIndex && !ytMode ? " active" : "");
+    div.className = "song-item" + (idx === songIndex && !ytMode ? " active" : "");
     div.innerHTML = `
-      <div class="song-item-info" style="flex:1;display:flex;align-items:center;gap:10px;overflow:hidden">
-        <span class="song-item-num">${origIdx === songIndex && !ytMode ? "▶" : origIdx + 1}</span>
+      <div class="song-item-info">
+        <span class="song-item-num">${idx === songIndex && !ytMode ? "▶" : idx + 1}</span>
         <div><div class="song-item-title">${song.title}</div><div class="song-item-artist">${song.artist}</div></div>
-      </div>
-      <button class="song-remove-btn" title="Remove song">✕</button>`;
-    div.querySelector(".song-item-info").addEventListener("click", () => {
+      </div>`;
+    div.addEventListener("click", () => {
       currentPlaylist = null; ytMode = false; stopYTProgress();
       if (ytPlayer && ytReady) ytPlayer.stopVideo();
-      loadSong(origIdx); audio.play(); setPlaying();
-    });
-    // ✅ Remove from library
-    div.querySelector(".song-remove-btn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      const wasPlaying = origIdx === songIndex && !ytMode;
-      currentUser.removeSong(origIdx);
-      if (wasPlaying && songs.length) loadSong(Math.min(origIdx, songs.length - 1));
-      if (!songs.length) { titleEl.textContent = "Nothing playing"; artistEl.textContent = "—"; }
-      updateSongList();
-      showToast("Song removed");
+      loadSong(idx); audio.play(); setPlaying();
     });
     listEl.appendChild(div);
   });
@@ -571,6 +423,8 @@ function updateSongList() {
 const playlistModal = document.getElementById("playlist-modal");
 const playlistNameInput = document.getElementById("playlist-name-input");
 let selectedEmoji = "🎵";
+
+// Tracks selected for the new playlist: array of track objects
 let modalSelectedTracks = [];
 
 document.getElementById("new-playlist-btn").addEventListener("click", openNewPlaylistModal);
@@ -596,6 +450,7 @@ document.getElementById("emoji-row").addEventListener("click", (e) => {
   selectedEmoji = opt.dataset.emoji;
 });
 
+// ── YouTube search inside modal ───────────────────────────────────────────────
 let modalSearchTimeout = null;
 
 document.getElementById("modal-yt-search").addEventListener("input", () => {
@@ -641,6 +496,7 @@ async function doModalSearch(query) {
       </div>`;
   }).join("");
 
+  // Add click handlers
   resultsEl.querySelectorAll(".modal-yt-result-item").forEach(item => {
     item.querySelector(".modal-yt-add-btn").addEventListener("click", (e) => {
       e.stopPropagation();
@@ -686,6 +542,7 @@ function renderModalSelectedList() {
       const idx = parseInt(btn.dataset.idx);
       modalSelectedTracks.splice(idx, 1);
       renderModalSelectedList();
+      // Re-render search results to update "Added" state
       const q = document.getElementById("modal-yt-search").value.trim();
       if (q) doModalSearch(q);
     });
@@ -702,10 +559,7 @@ document.getElementById("modal-create").addEventListener("click", () => {
   if (!name) { playlistNameInput.focus(); showToast("Enter a playlist name!"); return; }
   if (playlists[name]) { showToast("A playlist with that name already exists!"); return; }
   if (!modalSelectedTracks.length) { showToast("Add at least one song!"); return; }
-  // ✅ Uses Playlist class
-  const pl = new Playlist(name, selectedEmoji);
-  modalSelectedTracks.forEach(t => pl.addTrack(t));
-  currentUser.addPlaylist(pl);
+  playlists[name] = { icon: selectedEmoji, tracks: [...modalSelectedTracks] };
   renderAllPlaylists();
   closePlaylistModal();
   showToast(`✅ Playlist "${name}" created with ${modalSelectedTracks.length} songs!`);
@@ -747,50 +601,30 @@ function openPlaylistDetail(name) {
     </div>`;
 
   const list = document.getElementById("detail-song-list");
-
-  // ✅ Sort bar in detail modal
-  list.innerHTML = `
-    <div class="sort-bar" style="border-radius:8px 8px 0 0;margin-bottom:2px">
-      <span class="sort-label">Sort:</span>
-      <button class="sort-btn" id="detail-sort-title">Title</button>
-      <button class="sort-btn" id="detail-sort-artist">Artist</button>
-    </div>`;
-  document.getElementById("detail-sort-title").addEventListener("click",  () => { pl.sortByTitle();  openPlaylistDetail(name); showToast("Sorted by title"); });
-  document.getElementById("detail-sort-artist").addEventListener("click", () => { pl.sortByArtist(); openPlaylistDetail(name); showToast("Sorted by artist"); });
-
   if (!pl.tracks.length) {
-    list.insertAdjacentHTML("beforeend", `<div class="song-list-empty">No songs yet.</div>`);
+    list.innerHTML = `<div class="song-list-empty">No songs yet.</div>`;
   } else {
-    pl.tracks.forEach((track, pos) => {
+    list.innerHTML = pl.tracks.map((track, pos) => {
       const title = track.type === "local" ? (songs[track.index]?.title || "Unknown") : track.title;
       const artist = track.type === "local" ? (songs[track.index]?.artist || "Unknown") : track.artist;
       const badge = track.type === "yt" ? `<span class="sr-badge yt-badge" style="font-size:9px;padding:1px 5px;margin-left:6px">YT</span>` : "";
-      const item = document.createElement("div");
-      item.className = "picker-item";
-      item.style.cursor = "pointer";
-      item.innerHTML = `
+      return `<div class="picker-item" data-pos="${pos}" style="cursor:pointer">
         <span style="color:var(--text-muted);font-size:12px;min-width:22px">${pos + 1}</span>
-        <div class="picker-item-info" style="flex:1">
+        <div class="picker-item-info">
           <div class="picker-title" style="display:flex;align-items:center">${title}${badge}</div>
           <div class="picker-artist">${artist}</div>
         </div>
-        <button class="song-remove-btn" title="Remove">✕</button>`;
-      item.querySelector(".picker-item-info").addEventListener("click", () => {
+      </div>`;
+    }).join("");
+    list.querySelectorAll(".picker-item").forEach(item => {
+      item.addEventListener("click", () => {
+        const pos = parseInt(item.dataset.pos);
         currentPlaylist = name; currentPlaylistPos = pos;
-        playTrack(track);
+        playTrack(pl.tracks[pos]);
         detailModal.classList.remove("open");
         document.getElementById("library-panel").classList.add("open");
         updateSongList();
       });
-      // ✅ Remove track from playlist in detail modal
-      item.querySelector(".song-remove-btn").addEventListener("click", (e) => {
-        e.stopPropagation();
-        pl.removeTrack(pos);
-        openPlaylistDetail(name);
-        renderAllPlaylists();
-        showToast("Removed from playlist");
-      });
-      list.appendChild(item);
     });
   }
 
@@ -803,10 +637,9 @@ function openPlaylistDetail(name) {
     updateSongList();
   };
 
-  // ✅ Uses Playlist.shuffle()
   document.getElementById("detail-shuffle").onclick = () => {
     if (!pl.tracks.length) return;
-    pl.shuffle();
+    pl.tracks = [...pl.tracks].sort(() => Math.random() - 0.5);
     currentPlaylist = name; currentPlaylistPos = 0;
     playTrack(pl.tracks[0]);
     detailModal.classList.remove("open");
@@ -975,16 +808,12 @@ async function executeAction(action) {
       break;
     case "SHUFFLE":
       if (!songs.length) { addAIMessage("No local songs to shuffle!"); return; }
-      isShuffled = true;
-      document.getElementById("shuffle-btn").classList.add("active");
-      const indices = [...songs.keys()];
-      for (let i = indices.length - 1; i > 0; i--) {
+      for (let i = songs.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
-        [indices[i], indices[j]] = [indices[j], indices[i]];
+        [songs[i], songs[j]] = [songs[j], songs[i]];
       }
-      shuffleOrder = indices;
-      currentPlaylist = null; loadSong(shuffleOrder[0]); audio.play(); setPlaying();
-      showToast("🔀 Library shuffled!"); updateSongList();
+      currentPlaylist = null; updateSongList(); loadSong(0); audio.play(); setPlaying();
+      showToast("Library shuffled!");
       break;
     case "SHOW_PLAYLIST":
       if (playlists[action.name]) openPlaylistDetail(action.name);
