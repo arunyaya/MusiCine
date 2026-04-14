@@ -1,3 +1,4 @@
 .env
 /old
 /songs
+/node_modules

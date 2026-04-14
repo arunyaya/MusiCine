@@ -208,28 +208,116 @@
     <audio id="audio"></audio>
     <script src="script.js"></script>
     <script>
+      // ── Panel close buttons ──────────────────────────────────────────────────
       document.getElementById("library-close").addEventListener("click", () => {
         document.getElementById("library-panel").classList.remove("open");
       });
       document.getElementById("ai-close").addEventListener("click", () => {
         document.getElementById("ai-panel").classList.remove("open");
       });
+
+      // ── Hero CTA buttons ─────────────────────────────────────────────────────
       document.getElementById("hero-search-trigger").addEventListener("click", () => {
         document.getElementById("search-input").focus();
       });
       document.getElementById("hero-ai-trigger").addEventListener("click", () => {
         document.getElementById("ai-toggle").click();
       });
+
+      // ── Playlist empty-state CTAs ────────────────────────────────────────────
       document.getElementById("empty-cta-btn").addEventListener("click", () => {
         document.getElementById("new-playlist-btn").click();
       });
       document.getElementById("new-playlist-btn-2").addEventListener("click", () => {
         document.getElementById("new-playlist-btn").click();
       });
+
+      // ── See-all library ──────────────────────────────────────────────────────
       document.getElementById("see-all-library").addEventListener("click", () => {
         document.getElementById("library-panel").classList.add("open");
         document.getElementById("show-all-btn").click();
       });
+
+      // ── Hero stats + library section: update whenever songs/playlists change ─
+      // We patch the functions that mutate songs/playlists to keep the UI in sync.
+      // This runs after script.js is fully parsed, so all globals are available.
+
+      function refreshHomeUI() {
+        // Stats
+        const statSongs = document.getElementById("stat-songs");
+        const statPlaylists = document.getElementById("stat-playlists");
+        if (statSongs) statSongs.textContent = songs.length;
+        if (statPlaylists) statPlaylists.textContent = Object.keys(playlists).length;
+
+        // Local library quick-view section
+        const libSection = document.getElementById("library-section");
+        const previewGrid = document.getElementById("library-preview-grid");
+        if (libSection && previewGrid) {
+          if (songs.length > 0) {
+            libSection.style.display = "";
+            previewGrid.innerHTML = songs.slice(0, 6).map((s, i) => `
+              <div class="song-row-item" data-index="${i}">
+                <span class="song-row-num">${i + 1}</span>
+                <div class="song-row-info">
+                  <div class="song-row-title">${s.title}</div>
+                  <div class="song-row-artist">${s.artist}</div>
+                </div>
+              </div>`).join("");
+            previewGrid.querySelectorAll(".song-row-item").forEach(item => {
+              item.addEventListener("click", () => {
+                const idx = parseInt(item.dataset.index);
+                currentPlaylist = null;
+                ytMode = false; stopYTProgress();
+                if (ytPlayer && ytReady) ytPlayer.stopVideo();
+                loadSong(idx); audio.play(); setPlaying();
+                document.getElementById("library-panel").classList.add("open");
+              });
+            });
+          } else {
+            libSection.style.display = "none";
+          }
+        }
+
+        // Playlists section: empty state vs grid
+        const emptyState = document.getElementById("playlists-empty");
+        const playlistGrid = document.getElementById("user-playlist-grid");
+        const customNames = Object.keys(playlists);
+        if (emptyState && playlistGrid) {
+          if (customNames.length > 0) {
+            emptyState.style.display = "none";
+            playlistGrid.style.display = "";
+            playlistGrid.innerHTML = customNames.map(name => {
+              const pl = playlists[name];
+              return `<div class="playlist-card" data-playlist="${name}">
+                <span class="card-icon">${pl.icon || "🎵"}</span>
+                <div class="card-name">${name}</div>
+                <div class="card-meta">${pl.tracks.length} song${pl.tracks.length !== 1 ? "s" : ""}</div>
+              </div>`;
+            }).join("");
+            playlistGrid.querySelectorAll(".playlist-card").forEach(card => {
+              card.addEventListener("click", () => openPlaylistDetail(card.dataset.playlist));
+            });
+          } else {
+            emptyState.style.display = "";
+            playlistGrid.style.display = "none";
+          }
+        }
+      }
+
+      // Patch upload handler to also refresh home UI
+      const _origUploadChange = document.getElementById("upload-input").onchange;
+      document.getElementById("upload-input").addEventListener("change", () => {
+        // Give script.js's handler time to push to songs[], then refresh
+        setTimeout(refreshHomeUI, 300);
+      });
+
+      // Patch modal-create to refresh after playlist creation
+      document.getElementById("modal-create").addEventListener("click", () => {
+        setTimeout(refreshHomeUI, 50);
+      });
+
+      // Initial call (in case page loads with state)
+      refreshHomeUI();
     </script>
   </body>
 </html>
