@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="shortcut icon" href="img/app.jpg" type="image/x-icon">
+    <title>MusiCine</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+
+    <div id="yt-player" style="position:fixed;bottom:-10px;left:-10px;width:1px;height:1px;opacity:0;pointer-events:none;"></div>
+
+    <!-- TOP BAR -->
+    <nav class="topbar">
+      <div class="logo"><img src="img/app.jpg" alt="" class="logo-img">MusiCine</div>
+      <div class="center-controls">
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input type="text" id="search-input" placeholder="Search any song on YouTube…" autocomplete="off"/>
+          <div class="search-dropdown" id="search-dropdown"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <label class="upload-btn" for="upload-input">
+          ↑ Upload
+          <input type="file" id="upload-input" accept="audio/*" multiple hidden />
+        </label>
+        <button class="new-playlist-btn" id="new-playlist-btn">＋ New Playlist</button>
+        <button class="icon-btn" id="library-toggle">♫ Library</button>
+      </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main class="content" id="main-content">
+
+      <!-- HERO -->
+      <section class="hero" id="hero-section">
+        <div class="hero-bg-orb orb1"></div>
+        <div class="hero-bg-orb orb2"></div>
+        <div class="hero-eyebrow">✦ Your personal music space</div>
+        <h1 class="hero-title">What do you want<br>to <span class="hero-accent">listen to?</span></h1>
+        <p class="hero-sub">Search YouTube, upload your files, or ask the AI to play anything.</p>
+        <div class="hero-actions">
+          <button class="hero-btn-primary" id="hero-search-trigger">Search a song</button>
+          <button class="hero-btn-secondary" id="hero-ai-trigger">✦ Ask AI</button>
+        </div>
+        <div class="hero-stats">
+          <span id="stat-songs">0</span> songs &nbsp;·&nbsp; <span id="stat-playlists">0</span> playlists
+        </div>
+      </section>
+
+      <!-- YOUR PLAYLISTS -->
+      <section class="home-section" id="playlists-section">
+        <div class="section-header">
+          <h2>Your Playlists</h2>
+          <button class="section-action-btn" id="new-playlist-btn-2">＋ New</button>
+        </div>
+        <div class="empty-state" id="playlists-empty">
+          <div class="empty-icon">🎵</div>
+          <div class="empty-title">No playlists yet</div>
+          <div class="empty-sub">Create one manually or ask AI — <em>"Make me a chill playlist"</em></div>
+          <button class="empty-cta" id="empty-cta-btn">＋ Create Playlist</button>
+        </div>
+        <div class="playlist-grid" id="user-playlist-grid" style="display:none"></div>
+      </section>
+
+      <!-- LOCAL LIBRARY QUICK VIEW -->
+      <section class="home-section" id="library-section" style="display:none">
+        <div class="section-header">
+          <h2>Local Library</h2>
+          <button class="section-action-btn" id="see-all-library">See all →</button>
+        </div>
+        <div class="song-row-grid" id="library-preview-grid"></div>
+      </section>
+
+    </main>
+
+    <!-- LIBRARY SIDE PANEL -->
+    <div class="side-panel" id="library-panel">
+      <div class="side-panel-header">
+        <span id="library-panel-title">♫ Your Library</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="show-all-btn" id="show-all-btn">All Songs</button>
+          <button class="panel-close" id="library-close">✕</button>
+        </div>
+      </div>
+      <div class="song-list" id="song-list">
+        <div class="song-list-empty">No songs yet. Search YouTube or upload! 🎵</div>
+      </div>
+    </div>
+
+    <!-- AI PANEL -->
+    <div class="ai-panel" id="ai-panel">
+      <div class="ai-panel-header">
+        <span>✦ AI Music Assistant</span>
+        <button class="panel-close" id="ai-close">✕</button>
+      </div>
+      <div class="ai-messages" id="ai-messages"></div>
+      <div class="ai-input-row">
+        <input type="text" id="ai-input" placeholder="Play a song, make a playlist…" />
+        <button id="ai-send">Send</button>
+      </div>
+    </div>
+
+    <button class="ai-fab" id="ai-toggle" title="AI Music Assistant">✦ AI</button>
+
+    <!-- NEW PLAYLIST MODAL -->
+    <div class="modal-overlay" id="playlist-modal">
+      <div class="modal modal-wide">
+        <div class="modal-header">
+          <span>Create New Playlist</span>
+          <button class="panel-close" id="modal-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <input type="text" id="playlist-name-input" placeholder="Playlist name…" maxlength="40" />
+          <div class="modal-emoji-row" id="emoji-row">
+            <span class="emoji-opt selected" data-emoji="🎵">🎵</span>
+            <span class="emoji-opt" data-emoji="🌙">🌙</span>
+            <span class="emoji-opt" data-emoji="🔥">🔥</span>
+            <span class="emoji-opt" data-emoji="💫">💫</span>
+            <span class="emoji-opt" data-emoji="🎸">🎸</span>
+            <span class="emoji-opt" data-emoji="🌊">🌊</span>
+            <span class="emoji-opt" data-emoji="🍃">🍃</span>
+            <span class="emoji-opt" data-emoji="⚡">⚡</span>
+            <span class="emoji-opt" data-emoji="💪">💪</span>
+            <span class="emoji-opt" data-emoji="🚗">🚗</span>
+            <span class="emoji-opt" data-emoji="😢">😢</span>
+            <span class="emoji-opt" data-emoji="🧠">🧠</span>
+          </div>
+          <p class="modal-hint">Search YouTube to add songs:</p>
+          <div class="modal-yt-search-wrap">
+            <input type="text" id="modal-yt-search" placeholder="e.g. Blinding Lights, Kesariya…" autocomplete="off" />
+            <button class="modal-yt-search-btn" id="modal-yt-search-btn">Search</button>
+          </div>
+          <div class="modal-yt-results" id="modal-yt-results"></div>
+          <div id="modal-selected-section" style="display:none">
+            <p class="modal-hint" style="margin-top:14px">Added (<span id="modal-selected-count">0</span>):</p>
+            <div class="modal-song-picker" id="modal-selected-list"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-cancel" id="modal-cancel">Cancel</button>
+          <button class="modal-create" id="modal-create">Create Playlist</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PLAYLIST DETAIL MODAL -->
+    <div class="modal-overlay" id="playlist-detail-modal">
+      <div class="modal modal-wide">
+        <div class="modal-header">
+          <span id="detail-modal-title">Playlist</span>
+          <button class="panel-close" id="detail-modal-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="playlist-detail-info" id="playlist-detail-info"></div>
+          <div class="modal-song-picker" id="detail-song-list"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="modal-cancel" id="detail-play-all">▶ Play All</button>
+          <button class="modal-create" id="detail-shuffle">⇄ Shuffle</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <!-- PLAYER BAR -->
+    <div class="player-center" id="main-controls">
+      <div class="player-left">
+        <div class="thumbnail-wrap">
+          <img id="song-thumbnail" class="song-thumbnail" src="" />
+          <div class="thumb-placeholder" id="thumb-placeholder">♫</div>
+        </div>
+        <div class="song-details">
+          <div class="song-title" id="song-title">Nothing playing</div>
+          <div class="song-artist" id="song-artist">—</div>
+        </div>
+      </div>
+      <div class="player-middle">
+        <div class="music-controls">
+          <button class="control-btn ctrl-sm" id="shuffle-btn" title="Shuffle">⇄</button>
+          <button class="control-btn" id="prev">⏮</button>
+          <button class="control-btn play-btn" id="play">▶</button>
+          <button class="control-btn" id="next">⏭</button>
+          <button class="control-btn ctrl-sm" id="repeat-btn" title="Repeat">↻</button>
+        </div>
+        <div class="progress-container">
+          <span id="current-time">0:00</span>
+          <div class="progress-bar" id="progress-bar">
+            <div class="progress" id="progress"></div>
+            <div class="progress-thumb" id="progress-thumb"></div>
+          </div>
+          <span id="duration">0:00</span>
+        </div>
+      </div>
+      <div class="player-right">
+        <button class="vol-icon" id="vol-icon">🔊</button>
+        <input type="range" min="0" max="100" value="100" id="volume">
+      </div>
+    </div>
+
+    <audio id="audio"></audio>
+    <script src="script.js"></script>
+    <script>
+      document.getElementById("library-close").addEventListener("click", () => {
+        document.getElementById("library-panel").classList.remove("open");
+      });
+      document.getElementById("ai-close").addEventListener("click", () => {
+        document.getElementById("ai-panel").classList.remove("open");
+      });
+      document.getElementById("hero-search-trigger").addEventListener("click", () => {
+        document.getElementById("search-input").focus();
+      });
+      document.getElementById("hero-ai-trigger").addEventListener("click", () => {
+        document.getElementById("ai-toggle").click();
+      });
+      document.getElementById("empty-cta-btn").addEventListener("click", () => {
+        document.getElementById("new-playlist-btn").click();
+      });
+      document.getElementById("new-playlist-btn-2").addEventListener("click", () => {
+        document.getElementById("new-playlist-btn").click();
+      });
+      document.getElementById("see-all-library").addEventListener("click", () => {
+        document.getElementById("library-panel").classList.add("open");
+        document.getElementById("show-all-btn").click();
+      });
+    </script>
+  </body>
+</html>
