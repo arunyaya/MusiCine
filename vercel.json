@@ -1,0 +1,6 @@
+{
+  "routes": [
+    { "src": "/ai", "dest": "/server.js" },
+    { "src": "/yt/search", "dest": "/server.js" }
+  ]
+}
