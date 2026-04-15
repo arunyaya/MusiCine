@@ -920,6 +920,41 @@ main.content {
 .vol-icon:hover { color: var(--text); }
 .player-right input[type="range"] { cursor: pointer; accent-color: var(--blue); width: 90px; }
 
+/* ─── Playlist Detail Enhancements ──────────────────────────────────────────── */
+.detail-sort-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.detail-add-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.detail-remove-btn {
+  background: none;
+  border: none;
+  color: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.detail-track-item:hover .detail-remove-btn {
+  color: var(--text-muted);
+}
+.detail-remove-btn:hover {
+  background: rgba(255, 60, 60, 0.14) !important;
+  color: #ff5555 !important;
+}
+
 /* ═══════════════════ SCROLLBAR ═════════════════════════════════ */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

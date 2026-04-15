@@ -26,10 +26,6 @@
         </div>
       </div>
       <div class="topbar-right">
-        <label class="upload-btn" for="upload-input">
-          ↑ Upload
-          <input type="file" id="upload-input" accept="audio/*" multiple hidden />
-        </label>
         <button class="new-playlist-btn" id="new-playlist-btn">＋ New Playlist</button>
         <button class="icon-btn" id="library-toggle">♫ Library</button>
       </div>
@@ -159,11 +155,31 @@
         </div>
         <div class="modal-body">
           <div class="playlist-detail-info" id="playlist-detail-info"></div>
+
+          <!-- Sort bar -->
+          <div class="detail-sort-bar">
+            <span class="sort-label">Sort:</span>
+            <button class="sort-btn active" data-sort="default">Default</button>
+            <button class="sort-btn" data-sort="title">Title A–Z</button>
+            <button class="sort-btn" data-sort="artist">Artist A–Z</button>
+            <button class="sort-btn" data-sort="reverse">Reverse</button>
+          </div>
+
           <div class="modal-song-picker" id="detail-song-list"></div>
+
+          <!-- Add songs section -->
+          <div class="detail-add-section">
+            <p class="modal-hint" style="margin-bottom:10px">Add more songs:</p>
+            <div class="modal-yt-search-wrap">
+              <input type="text" id="detail-yt-search" placeholder="Search YouTube to add songs…" autocomplete="off" />
+              <button class="modal-yt-search-btn" id="detail-yt-search-btn">Search</button>
+            </div>
+            <div class="modal-yt-results" id="detail-yt-results"></div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="modal-cancel" id="detail-play-all">▶ Play All</button>
-          <button class="modal-create" id="detail-shuffle">⇄ Shuffle</button>
+          <button class="modal-create" id="detail-shuffle">⇄ Shuffle &amp; Play</button>
         </div>
       </div>
     </div>
@@ -303,13 +319,6 @@
           }
         }
       }
-
-      // Patch upload handler to also refresh home UI
-      const _origUploadChange = document.getElementById("upload-input").onchange;
-      document.getElementById("upload-input").addEventListener("change", () => {
-        // Give script.js's handler time to push to songs[], then refresh
-        setTimeout(refreshHomeUI, 300);
-      });
 
       // Patch modal-create to refresh after playlist creation
       document.getElementById("modal-create").addEventListener("click", () => {

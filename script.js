@@ -236,21 +236,7 @@ function readTags(file, url) {
   });
 }
 
-// ─── Upload ───────────────────────────────────────────────────────────────────
-document.getElementById("upload-input").addEventListener("change", async (e) => {
-  const files = Array.from(e.target.files);
-  const wasEmpty = songs.length === 0;
-  for (const file of files) {
-    const url = URL.createObjectURL(file);
-    const song = await readTags(file, url);
-    songs.push(song);
-  }
-  if (wasEmpty && songs.length) loadSong(0);
-  updateSongList();
-  showToast(`Added ${files.length} song${files.length > 1 ? "s" : ""}!`);
-  addAIMessage(`🎵 Added ${files.length} local song(s)!`);
-  e.target.value = "";
-});
+// ─── Upload removed ───────────────────────────────────────────────────────────
 
 // ─── Playback controls ────────────────────────────────────────────────────────
 function setPlaying() { playBtn.textContent = "⏸"; }
@@ -590,8 +576,99 @@ document.getElementById("user-playlist-grid").addEventListener("click", (e) => {
 // ─── Playlist Detail Modal ────────────────────────────────────────────────────
 const detailModal = document.getElementById("playlist-detail-modal");
 
+let detailCurrentPlaylist = null;   // name of playlist open in detail modal
+let detailSortMode = "default";     // current sort: default | title | artist | reverse
+let detailYTSearchTimeout = null;
+
+function getDetailTracks(name) {
+  const pl = playlists[name];
+  if (!pl) return [];
+  const tracks = [...pl.tracks]; // work on a copy for display
+  if (detailSortMode === "title") {
+    tracks.sort((a, b) => {
+      const ta = (a.type === "local" ? songs[a.index]?.title : a.title) || "";
+      const tb = (b.type === "local" ? songs[b.index]?.title : b.title) || "";
+      return ta.localeCompare(tb);
+    });
+  } else if (detailSortMode === "artist") {
+    tracks.sort((a, b) => {
+      const aa = (a.type === "local" ? songs[a.index]?.artist : a.artist) || "";
+      const ab = (b.type === "local" ? songs[b.index]?.artist : b.artist) || "";
+      return aa.localeCompare(ab);
+    });
+  } else if (detailSortMode === "reverse") {
+    tracks.reverse();
+  }
+  return tracks;
+}
+
+function renderDetailSongList(name) {
+  const pl = playlists[name];
+  const list = document.getElementById("detail-song-list");
+  const displayTracks = getDetailTracks(name);
+
+  // Update count
+  const countEl = document.querySelector("#playlist-detail-info .detail-count");
+  if (countEl) countEl.textContent = `${pl.tracks.length} song${pl.tracks.length !== 1 ? "s" : ""}`;
+
+  if (!displayTracks.length) {
+    list.innerHTML = `<div class="song-list-empty">No songs yet. Search below to add some!</div>`;
+    return;
+  }
+
+  list.innerHTML = displayTracks.map((track, pos) => {
+    const title = track.type === "local" ? (songs[track.index]?.title || "Unknown") : track.title;
+    const artist = track.type === "local" ? (songs[track.index]?.artist || "Unknown") : track.artist;
+    const badge = track.type === "yt" ? `<span class="sr-badge yt-badge" style="font-size:9px;padding:1px 5px;margin-left:6px">YT</span>` : "";
+    // Store original index for removal (we need to remove from pl.tracks, not sorted copy)
+    const origIdx = pl.tracks.indexOf(track);
+    return `<div class="picker-item detail-track-item" data-pos="${pos}" data-orig-idx="${origIdx}" style="cursor:pointer">
+      <span style="color:var(--text-muted);font-size:12px;min-width:22px">${pos + 1}</span>
+      <div class="picker-item-info" style="flex:1;min-width:0">
+        <div class="picker-title" style="display:flex;align-items:center">${title}${badge}</div>
+        <div class="picker-artist">${artist}</div>
+      </div>
+      <button class="detail-remove-btn" data-orig-idx="${origIdx}" title="Remove from playlist">✕</button>
+    </div>`;
+  }).join("");
+
+  // Play on click
+  list.querySelectorAll(".detail-track-item").forEach(item => {
+    item.addEventListener("click", (e) => {
+      if (e.target.closest(".detail-remove-btn")) return;
+      const origIdx = parseInt(item.dataset.origIdx);
+      currentPlaylist = name;
+      currentPlaylistPos = origIdx;
+      playTrack(pl.tracks[origIdx]);
+      detailModal.classList.remove("open");
+      document.getElementById("library-panel").classList.add("open");
+      updateSongList();
+    });
+  });
+
+  // Remove on ✕
+  list.querySelectorAll(".detail-remove-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const origIdx = parseInt(btn.dataset.origIdx);
+      pl.tracks.splice(origIdx, 1);
+      // If currently playing this playlist, adjust position
+      if (currentPlaylist === name) {
+        if (currentPlaylistPos >= pl.tracks.length) currentPlaylistPos = Math.max(0, pl.tracks.length - 1);
+      }
+      renderDetailSongList(name);
+      renderAllPlaylists();
+      if (typeof refreshHomeUI === "function") refreshHomeUI();
+      showToast("Song removed from playlist");
+    });
+  });
+}
+
 function openPlaylistDetail(name) {
   const pl = playlists[name];
+  detailCurrentPlaylist = name;
+  detailSortMode = "default";
+
   document.getElementById("detail-modal-title").textContent = `${pl.icon} ${name}`;
   document.getElementById("playlist-detail-info").innerHTML = `
     <div class="detail-icon">${pl.icon}</div>
@@ -600,33 +677,81 @@ function openPlaylistDetail(name) {
       <div class="detail-count">${pl.tracks.length} song${pl.tracks.length !== 1 ? "s" : ""}</div>
     </div>`;
 
-  const list = document.getElementById("detail-song-list");
-  if (!pl.tracks.length) {
-    list.innerHTML = `<div class="song-list-empty">No songs yet.</div>`;
-  } else {
-    list.innerHTML = pl.tracks.map((track, pos) => {
-      const title = track.type === "local" ? (songs[track.index]?.title || "Unknown") : track.title;
-      const artist = track.type === "local" ? (songs[track.index]?.artist || "Unknown") : track.artist;
-      const badge = track.type === "yt" ? `<span class="sr-badge yt-badge" style="font-size:9px;padding:1px 5px;margin-left:6px">YT</span>` : "";
-      return `<div class="picker-item" data-pos="${pos}" style="cursor:pointer">
-        <span style="color:var(--text-muted);font-size:12px;min-width:22px">${pos + 1}</span>
-        <div class="picker-item-info">
-          <div class="picker-title" style="display:flex;align-items:center">${title}${badge}</div>
-          <div class="picker-artist">${artist}</div>
+  // Reset sort buttons
+  document.querySelectorAll(".detail-sort-bar .sort-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.sort === "default");
+  });
+
+  // Reset YT search
+  document.getElementById("detail-yt-search").value = "";
+  document.getElementById("detail-yt-results").innerHTML = "";
+
+  renderDetailSongList(name);
+
+  // Sort buttons
+  document.querySelectorAll(".detail-sort-bar .sort-btn").forEach(btn => {
+    btn.onclick = () => {
+      detailSortMode = btn.dataset.sort;
+      document.querySelectorAll(".detail-sort-bar .sort-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderDetailSongList(name);
+    };
+  });
+
+  // YT search to add songs
+  const detailYTSearch = document.getElementById("detail-yt-search");
+  const detailYTResults = document.getElementById("detail-yt-results");
+  const detailYTBtn = document.getElementById("detail-yt-search-btn");
+
+  async function doDetailSearch(query) {
+    detailYTResults.innerHTML = `<div class="modal-yt-searching">Searching…</div>`;
+    const results = await searchYouTube(query + " official audio");
+    if (!results.length) { detailYTResults.innerHTML = `<div class="modal-yt-searching">No results found.</div>`; return; }
+    detailYTResults.innerHTML = results.map(v => {
+      const thumb = v.snippet.thumbnails?.default?.url || "";
+      const title = v.snippet.title;
+      const channel = v.snippet.channelTitle;
+      const videoId = v.id.videoId;
+      const alreadyAdded = pl.tracks.some(t => t.videoId === videoId);
+      return `<div class="modal-yt-result-item ${alreadyAdded ? "already-added" : ""}"
+        data-videoid="${videoId}"
+        data-title="${title.replace(/"/g, "&quot;")}"
+        data-artist="${channel.replace(/"/g, "&quot;")}"
+        data-thumb="${thumb}">
+        ${thumb ? `<img src="${thumb}" class="modal-yt-thumb"/>` : '<div class="modal-yt-thumb-placeholder">♫</div>'}
+        <div class="modal-yt-info">
+          <div class="modal-yt-title">${title}</div>
+          <div class="modal-yt-artist">${channel}</div>
         </div>
+        <button class="modal-yt-add-btn ${alreadyAdded ? "added" : ""}">${alreadyAdded ? "✓ Added" : "+ Add"}</button>
       </div>`;
     }).join("");
-    list.querySelectorAll(".picker-item").forEach(item => {
-      item.addEventListener("click", () => {
-        const pos = parseInt(item.dataset.pos);
-        currentPlaylist = name; currentPlaylistPos = pos;
-        playTrack(pl.tracks[pos]);
-        detailModal.classList.remove("open");
-        document.getElementById("library-panel").classList.add("open");
-        updateSongList();
+
+    detailYTResults.querySelectorAll(".modal-yt-result-item").forEach(item => {
+      item.querySelector(".modal-yt-add-btn").addEventListener("click", (e) => {
+        e.stopPropagation();
+        const { videoid, title, artist, thumb } = item.dataset;
+        if (pl.tracks.some(t => t.videoId === videoid)) return;
+        pl.tracks.push({ type: "yt", videoId: videoid, title, artist, thumb });
+        item.classList.add("already-added");
+        item.querySelector(".modal-yt-add-btn").textContent = "✓ Added";
+        item.querySelector(".modal-yt-add-btn").classList.add("added");
+        renderDetailSongList(name);
+        renderAllPlaylists();
+        if (typeof refreshHomeUI === "function") refreshHomeUI();
+        showToast(`Added: ${title}`);
       });
     });
   }
+
+  detailYTSearch.oninput = () => {
+    clearTimeout(detailYTSearchTimeout);
+    const q = detailYTSearch.value.trim();
+    if (!q) { detailYTResults.innerHTML = ""; return; }
+    detailYTSearchTimeout = setTimeout(() => doDetailSearch(q), 500);
+  };
+  detailYTBtn.onclick = () => { const q = detailYTSearch.value.trim(); if (q) doDetailSearch(q); };
+  detailYTSearch.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); const q = e.target.value.trim(); if (q) doDetailSearch(q); } };
 
   document.getElementById("detail-play-all").onclick = () => {
     if (!pl.tracks.length) return;
@@ -639,7 +764,9 @@ function openPlaylistDetail(name) {
 
   document.getElementById("detail-shuffle").onclick = () => {
     if (!pl.tracks.length) return;
-    pl.tracks = [...pl.tracks].sort(() => Math.random() - 0.5);
+    // Shuffle the actual playlist tracks
+    const shuffled = [...pl.tracks].sort(() => Math.random() - 0.5);
+    pl.tracks = shuffled;
     currentPlaylist = name; currentPlaylistPos = 0;
     playTrack(pl.tracks[0]);
     detailModal.classList.remove("open");
@@ -697,7 +824,7 @@ const aiSend = document.getElementById("ai-send");
 aiToggle.addEventListener("click", () => {
   aiPanel.classList.toggle("open");
   if (aiPanel.classList.contains("open") && aiMessages.children.length === 0) {
-    addAIMessage("Hey! 👋 I'm your AI music assistant. I can:\n• Search & play ANY song from YouTube\n• Create playlists\n• Control playback\n\nTry: \"Play Blinding Lights\" or \"Create a chill playlist\"!");
+    addAIMessage("Hey! 👋 I'm your AI music assistant. I can:\n• Search & play ANY song from YouTube\n• Create full playlists with multiple songs\n• Control playback\n\nTry: \"Play Blinding Lights\", \"Create a chill playlist with 5 songs\", or \"Make a workout playlist\"!");
   }
 });
 
@@ -747,21 +874,39 @@ Local songs: ${songListText}
 Playlists: ${playlistText}
 ${nowPlaying}
 
-ACTIONS you can trigger:
-Play from YouTube: \`\`\`action
+ACTIONS you can trigger (output ONLY ONE action block per response):
+
+Play a single song from YouTube:
+\`\`\`action
 { "type": "PLAY_YOUTUBE", "query": "song name artist" }
 \`\`\`
-Play local: \`\`\`action
+
+Play a local song by index:
+\`\`\`action
 { "type": "PLAY_LOCAL", "index": 0 }
 \`\`\`
-Shuffle local: \`\`\`action
+
+Shuffle local library:
+\`\`\`action
 { "type": "SHUFFLE" }
 \`\`\`
-Show playlist: \`\`\`action
-{ "type": "SHOW_PLAYLIST", "name": "Chill Vibes" }
+
+Show an existing playlist:
+\`\`\`action
+{ "type": "SHOW_PLAYLIST", "name": "Playlist Name" }
 \`\`\`
 
-If asked to play any song, use PLAY_YOUTUBE. Be friendly and concise.`;
+Create a playlist with multiple YouTube songs (use this when user asks to "make", "create", or "build" a playlist):
+\`\`\`action
+{ "type": "CREATE_PLAYLIST", "name": "Playlist Name", "emoji": "🎵", "songs": ["Artist1 - Song1 official audio", "Artist2 - Song2 official audio", "Artist3 - Song3 official audio"] }
+\`\`\`
+
+IMPORTANT RULES:
+- When the user asks to CREATE a playlist (e.g. "make a chill playlist", "create a workout playlist", "build a sad songs playlist"), you MUST use CREATE_PLAYLIST with at least 5 relevant song queries in the "songs" array.
+- For CREATE_PLAYLIST, the "songs" array should contain search queries (not just song names). Include artist name for accuracy.
+- Pick songs that genuinely match the mood/theme the user asks for.
+- For CREATE_PLAYLIST, choose a fitting emoji for the playlist theme.
+- Be friendly, concise, and confirm what you're doing.`;
 
   try {
     const res = await fetch("/ai", {
@@ -787,13 +932,16 @@ If asked to play any song, use PLAY_YOUTUBE. Be friendly and concise.`;
   }
 }
 
+// ─── Execute AI Actions ───────────────────────────────────────────────────────
 async function executeAction(action) {
   switch (action.type) {
+
     case "PLAY_LOCAL":
       if (action.index >= 0 && action.index < songs.length) {
         currentPlaylist = null; loadSong(action.index); audio.play(); setPlaying();
       }
       break;
+
     case "PLAY_YOUTUBE":
       if (action.query) {
         showToast(`🔍 Searching YouTube…`);
@@ -806,6 +954,7 @@ async function executeAction(action) {
         } else { addAIMessage("Couldn't find that on YouTube. Try a different search!"); }
       }
       break;
+
     case "SHUFFLE":
       if (!songs.length) { addAIMessage("No local songs to shuffle!"); return; }
       for (let i = songs.length - 1; i > 0; i--) {
@@ -815,9 +964,62 @@ async function executeAction(action) {
       currentPlaylist = null; updateSongList(); loadSong(0); audio.play(); setPlaying();
       showToast("Library shuffled!");
       break;
+
     case "SHOW_PLAYLIST":
       if (playlists[action.name]) openPlaylistDetail(action.name);
       break;
+
+    // ── NEW: Create playlist by searching YouTube for each song ──────────────
+    case "CREATE_PLAYLIST": {
+      const name = action.name || "AI Playlist";
+      const emoji = action.emoji || "🎵";
+      const songQueries = action.songs || [];
+
+      if (!songQueries.length) {
+        addAIMessage("I couldn't figure out which songs to add. Try being more specific!");
+        break;
+      }
+      if (playlists[name]) {
+        addAIMessage(`A playlist called "${name}" already exists! Ask me to make one with a different name.`);
+        break;
+      }
+
+      showToast(`🔍 Building "${name}"…`);
+      addAIMessage(`⏳ Searching YouTube for ${songQueries.length} songs, please wait…`);
+
+      const tracks = [];
+      for (const query of songQueries) {
+        try {
+          const results = await searchYouTube(query);
+          if (results && results.length) {
+            const v = results[0];
+            tracks.push({
+              type: "yt",
+              videoId: v.id.videoId,
+              title: v.snippet.title,
+              artist: v.snippet.channelTitle,
+              thumb: v.snippet.thumbnails?.default?.url || "",
+            });
+          }
+        } catch (e) {
+          console.error("Failed to search for:", query, e);
+        }
+      }
+
+      if (!tracks.length) {
+        addAIMessage("Couldn't find any songs on YouTube. Try a different playlist theme!");
+        break;
+      }
+
+      playlists[name] = { icon: emoji, tracks };
+      renderAllPlaylists();
+      showToast(`✅ "${name}" created with ${tracks.length} songs!`);
+      addAIMessage(`✅ Created playlist "${name}" ${emoji} with ${tracks.length} songs! Open it from Your Playlists or say "show ${name}".`);
+
+      // Trigger home UI refresh if available
+      if (typeof refreshHomeUI === "function") refreshHomeUI();
+      break;
+    }
   }
 }
 
