@@ -68,6 +68,52 @@ function playYouTubeVideo(videoId, title, artist, thumb) {
   ytPlayer.loadVideoById(videoId);
   setPlaying();
   updateSongList();
+
+  // Track context for recommendations (no prefetch — fetch on demand when Next is clicked)
+  ytPlayedVideoIds.add(videoId);
+  ytCurrentContext = { title, artist, videoId };
+}
+
+function normalizeStr(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function isDifferentArtist(result, currentTitle, currentArtist) {
+  const resTitle  = normalizeStr(result.snippet.title);
+  const resChannel = normalizeStr(result.snippet.channelTitle);
+  const normArtist = normalizeStr(currentArtist);
+  const normTitle  = normalizeStr(currentTitle);
+
+  // Reject if channel name closely matches current artist
+  if (normArtist.length > 3 && resChannel.includes(normArtist)) return false;
+  if (normArtist.length > 3 && normArtist.includes(resChannel)) return false;
+
+  // Reject if result title contains both the current song title AND artist
+  // (i.e. same song re-uploaded by a different channel)
+  const titleWords = normTitle.replace(/\s+/g, "").slice(0, 20); // first 20 chars as fingerprint
+  if (titleWords.length > 5 && resTitle.includes(titleWords)) return false;
+
+  return true;
+}
+
+async function prefetchYTRecommendations(title, artist) {
+  const cleanTitle = title
+    .replace(/\(.*?(official|audio|video|lyrics|ft\.?|feat\.?).*?\)/gi, "")
+    .replace(/\[.*?\]/gi, "")
+    .trim();
+
+  // Query focuses on the ARTIST's style/genre, NOT the specific song title
+  // This avoids YouTube returning re-uploads of the same track
+  const query = `${artist} style music mix`;
+  try {
+    const results = await searchYouTube(query);
+    ytRecommendQueue = (results || []).filter(v =>
+      !ytPlayedVideoIds.has(v.id.videoId) &&
+      isDifferentArtist(v, cleanTitle, artist)
+    );
+  } catch (e) {
+    ytRecommendQueue = [];
+  }
 }
 
 // ─── YouTube Search (shared) ──────────────────────────────────────────────────
@@ -182,6 +228,11 @@ let isShuffled = false;
 let isRepeat = false;
 let shuffleOrder = [];
 
+// ─── YT Recommendation State ──────────────────────────────────────────────────
+let ytCurrentContext = null;   // { title, artist, query } of what's playing
+let ytRecommendQueue = [];     // pre-fetched recommendation results
+let ytPlayedVideoIds = new Set(); // avoid re-playing same video in a session
+
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function showToast(msg) {
   const t = document.getElementById("toast");
@@ -236,7 +287,22 @@ function readTags(file, url) {
   });
 }
 
-// ─── Upload removed ───────────────────────────────────────────────────────────
+// ─── Upload ───────────────────────────────────────────────────────────────────
+document.getElementById("upload-input").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  const wasEmpty = songs.length === 0;
+  for (const file of files) {
+    const url = URL.createObjectURL(file);
+    const song = await readTags(file, url);
+    songs.push(song);
+  }
+  updateSongList();
+  if (wasEmpty) { loadSong(0); audio.play(); setPlaying(); }
+  showToast(`✅ Added ${files.length} song${files.length !== 1 ? "s" : ""}!`);
+  if (typeof refreshHomeUI === "function") refreshHomeUI();
+  e.target.value = "";
+});
 
 // ─── Playback controls ────────────────────────────────────────────────────────
 function setPlaying() { playBtn.textContent = "⏸"; }
@@ -270,13 +336,77 @@ function nextSong() {
     currentPlaylistPos = (currentPlaylistPos + 1) % tracks.length;
     playTrack(tracks[currentPlaylistPos]); updateSongList(); return;
   }
-  if (ytMode) return;
+  if (ytMode) {
+    // ── Recommendation-based next for standalone YT playback ──
+    playNextYTRecommendation();
+    return;
+  }
   if (!songs.length) return;
   if (isShuffled && shuffleOrder.length) {
     const pos = shuffleOrder.indexOf(songIndex);
     loadSong(shuffleOrder[(pos + 1) % shuffleOrder.length]);
   } else { loadSong((songIndex + 1) % songs.length); }
   audio.play(); setPlaying();
+}
+
+async function playNextYTRecommendation() {
+  // If we have pre-fetched results ready, use them immediately
+  if (ytRecommendQueue.length > 0) {
+    const next = ytRecommendQueue.shift();
+    const title = next.snippet.title;
+    const artist = next.snippet.channelTitle;
+    const videoId = next.id.videoId;
+    const thumb = next.snippet.thumbnails?.default?.url || "";
+    showToast(`▶ Up next: ${title}`);
+    playYouTubeVideo(videoId, title, artist, thumb);
+    return;
+  }
+
+  // Queue empty — do a live search based on current context
+  if (!ytCurrentContext) { showToast("Nothing to recommend. Search a song first!"); return; }
+
+  showToast("🔍 Finding similar songs…");
+  const { title, artist } = ytCurrentContext;
+  const cleanTitle = title
+    .replace(/\(.*?(official|audio|video|lyrics|ft\.?|feat\.?).*?\)/gi, "")
+    .replace(/\[.*?\]/gi, "")
+    .trim();
+
+  // Queries that target the genre/vibe — NOT the specific song — to get different artists
+  const queries = [
+    `${artist} type beats playlist`,
+    `songs similar to ${artist}`,
+    `${artist} genre mix`,
+  ];
+
+  for (const query of queries) {
+    try {
+      const results = await searchYouTube(query);
+      const fresh = (results || []).filter(v =>
+        !ytPlayedVideoIds.has(v.id.videoId) &&
+        isDifferentArtist(v, cleanTitle, artist)
+      );
+      if (fresh.length > 0) {
+        const next = fresh[0];
+        ytRecommendQueue = fresh.slice(1);
+        showToast(`▶ Up next: ${next.snippet.title}`);
+        playYouTubeVideo(next.id.videoId, next.snippet.title, next.snippet.channelTitle, next.snippet.thumbnails?.default?.url || "");
+        return;
+      }
+    } catch (e) { /* try next query */ }
+  }
+
+  // Absolute fallback: reset played history and retry
+  showToast("🔄 Refreshing recommendations…");
+  ytPlayedVideoIds.clear();
+  if (ytCurrentContext) ytPlayedVideoIds.add(ytCurrentContext.videoId);
+  await prefetchYTRecommendations(title, artist);
+  if (ytRecommendQueue.length > 0) {
+    const next = ytRecommendQueue.shift();
+    playYouTubeVideo(next.id.videoId, next.snippet.title, next.snippet.channelTitle, next.snippet.thumbnails?.default?.url || "");
+  } else {
+    showToast("No recommendations found. Try searching a new song!");
+  }
 }
 
 function prevSong() {
