@@ -69,7 +69,6 @@ function playYouTubeVideo(videoId, title, artist, thumb) {
   setPlaying();
   updateSongList();
 
-  // Track context for recommendations (no prefetch — fetch on demand when Next is clicked)
   ytPlayedVideoIds.add(videoId);
   ytCurrentContext = { title, artist, videoId };
 }
@@ -79,18 +78,15 @@ function normalizeStr(s) {
 }
 
 function isDifferentArtist(result, currentTitle, currentArtist) {
-  const resTitle  = normalizeStr(result.snippet.title);
+  const resTitle   = normalizeStr(result.snippet.title);
   const resChannel = normalizeStr(result.snippet.channelTitle);
   const normArtist = normalizeStr(currentArtist);
   const normTitle  = normalizeStr(currentTitle);
 
-  // Reject if channel name closely matches current artist
   if (normArtist.length > 3 && resChannel.includes(normArtist)) return false;
   if (normArtist.length > 3 && normArtist.includes(resChannel)) return false;
 
-  // Reject if result title contains both the current song title AND artist
-  // (i.e. same song re-uploaded by a different channel)
-  const titleWords = normTitle.replace(/\s+/g, "").slice(0, 20); // first 20 chars as fingerprint
+  const titleWords = normTitle.replace(/\s+/g, "").slice(0, 20);
   if (titleWords.length > 5 && resTitle.includes(titleWords)) return false;
 
   return true;
@@ -102,8 +98,6 @@ async function prefetchYTRecommendations(title, artist) {
     .replace(/\[.*?\]/gi, "")
     .trim();
 
-  // Query focuses on the ARTIST's style/genre, NOT the specific song title
-  // This avoids YouTube returning re-uploads of the same track
   const query = `${artist} style music mix`;
   try {
     const results = await searchYouTube(query);
@@ -229,9 +223,9 @@ let isRepeat = false;
 let shuffleOrder = [];
 
 // ─── YT Recommendation State ──────────────────────────────────────────────────
-let ytCurrentContext = null;   // { title, artist, query } of what's playing
-let ytRecommendQueue = [];     // pre-fetched recommendation results
-let ytPlayedVideoIds = new Set(); // avoid re-playing same video in a session
+let ytCurrentContext = null;
+let ytRecommendQueue = [];
+let ytPlayedVideoIds = new Set();
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 function showToast(msg) {
@@ -336,11 +330,7 @@ function nextSong() {
     currentPlaylistPos = (currentPlaylistPos + 1) % tracks.length;
     playTrack(tracks[currentPlaylistPos]); updateSongList(); return;
   }
-  if (ytMode) {
-    // ── Recommendation-based next for standalone YT playback ──
-    playNextYTRecommendation();
-    return;
-  }
+  if (ytMode) { playNextYTRecommendation(); return; }
   if (!songs.length) return;
   if (isShuffled && shuffleOrder.length) {
     const pos = shuffleOrder.indexOf(songIndex);
@@ -350,7 +340,6 @@ function nextSong() {
 }
 
 async function playNextYTRecommendation() {
-  // If we have pre-fetched results ready, use them immediately
   if (ytRecommendQueue.length > 0) {
     const next = ytRecommendQueue.shift();
     const title = next.snippet.title;
@@ -361,24 +350,18 @@ async function playNextYTRecommendation() {
     playYouTubeVideo(videoId, title, artist, thumb);
     return;
   }
-
-  // Queue empty — do a live search based on current context
   if (!ytCurrentContext) { showToast("Nothing to recommend. Search a song first!"); return; }
-
   showToast("🔍 Finding similar songs…");
   const { title, artist } = ytCurrentContext;
   const cleanTitle = title
     .replace(/\(.*?(official|audio|video|lyrics|ft\.?|feat\.?).*?\)/gi, "")
     .replace(/\[.*?\]/gi, "")
     .trim();
-
-  // Queries that target the genre/vibe — NOT the specific song — to get different artists
   const queries = [
     `${artist} type beats playlist`,
     `songs similar to ${artist}`,
     `${artist} genre mix`,
   ];
-
   for (const query of queries) {
     try {
       const results = await searchYouTube(query);
@@ -395,8 +378,6 @@ async function playNextYTRecommendation() {
       }
     } catch (e) { /* try next query */ }
   }
-
-  // Absolute fallback: reset played history and retry
   showToast("🔄 Refreshing recommendations…");
   ytPlayedVideoIds.clear();
   if (ytCurrentContext) ytPlayedVideoIds.add(ytCurrentContext.videoId);
@@ -535,13 +516,13 @@ function updateSongList() {
   });
 }
 
-// ─── NEW PLAYLIST MODAL with YouTube search ───────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── NEW PLAYLIST MODAL — with Local + YouTube tabs ───────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 const playlistModal = document.getElementById("playlist-modal");
 const playlistNameInput = document.getElementById("playlist-name-input");
 let selectedEmoji = "🎵";
-
-// Tracks selected for the new playlist: array of track objects
-let modalSelectedTracks = [];
+let modalSelectedTracks = [];   // { type:"local"|"yt", index?, videoId?, title, artist, thumb? }
 
 document.getElementById("new-playlist-btn").addEventListener("click", openNewPlaylistModal);
 
@@ -553,20 +534,100 @@ function openNewPlaylistModal() {
   document.querySelector('.emoji-opt[data-emoji="🎵"]').classList.add("selected");
   document.getElementById("modal-yt-search").value = "";
   document.getElementById("modal-yt-results").innerHTML = "";
-  renderModalSelectedList();
+
+  // Reset to local tab
+  switchModalTab("local");
+  renderModalLocalPicker();
+  renderModalSelectedTags();
+
   playlistModal.classList.add("open");
   setTimeout(() => playlistNameInput.focus(), 100);
 }
 
-document.getElementById("emoji-row").addEventListener("click", (e) => {
-  const opt = e.target.closest(".emoji-opt");
-  if (!opt) return;
-  document.querySelectorAll(".emoji-opt").forEach(x => x.classList.remove("selected"));
-  opt.classList.add("selected");
-  selectedEmoji = opt.dataset.emoji;
+// ── Tab switching (new playlist modal) ───────────────────────────────────────
+document.querySelectorAll("#playlist-modal .modal-tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => switchModalTab(btn.dataset.tab));
 });
 
-// ── YouTube search inside modal ───────────────────────────────────────────────
+function switchModalTab(tab) {
+  document.querySelectorAll("#playlist-modal .modal-tab-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll("#playlist-modal .modal-tab-panel").forEach(p =>
+    p.classList.toggle("active", p.id === `tab-${tab}`));
+  if (tab === "local") renderModalLocalPicker();
+}
+
+// ── Render local songs picker inside modal ────────────────────────────────────
+function renderModalLocalPicker() {
+  const picker = document.getElementById("local-song-picker");
+  if (!songs.length) {
+    picker.innerHTML = `<div class="local-song-empty">No local songs uploaded yet.<br>Upload audio files using the ↑ Upload button!</div>`;
+    return;
+  }
+  picker.innerHTML = songs.map((s, i) => {
+    const isSelected = modalSelectedTracks.some(t => t.type === "local" && t.index === i);
+    return `<div class="local-picker-item${isSelected ? " selected" : ""}" data-local-idx="${i}">
+      <div class="picker-check">${isSelected ? "✓" : ""}</div>
+      <div class="lpi-info" style="overflow:hidden;flex:1;min-width:0">
+        <div class="lpi-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.title}</div>
+        <div class="lpi-artist" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.artist}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  picker.querySelectorAll(".local-picker-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const idx = parseInt(item.dataset.localIdx);
+      const existingPos = modalSelectedTracks.findIndex(t => t.type === "local" && t.index === idx);
+      if (existingPos >= 0) {
+        // Deselect
+        modalSelectedTracks.splice(existingPos, 1);
+      } else {
+        // Select
+        modalSelectedTracks.push({ type: "local", index: idx, title: songs[idx].title, artist: songs[idx].artist });
+      }
+      renderModalLocalPicker();
+      renderModalSelectedTags();
+    });
+  });
+}
+
+// ── Render selected songs as tags ─────────────────────────────────────────────
+function renderModalSelectedTags() {
+  const section = document.getElementById("modal-selected-section");
+  const tagsEl  = document.getElementById("modal-selected-tags");
+  const countEl = document.getElementById("modal-selected-count");
+
+  if (!modalSelectedTracks.length) { section.style.display = "none"; return; }
+  section.style.display = "block";
+  countEl.textContent = modalSelectedTracks.length;
+
+  tagsEl.innerHTML = modalSelectedTracks.map((t, i) => {
+    const label = t.type === "yt" ? "YT" : "Local";
+    const cls   = t.type === "yt" ? "yt"  : "local";
+    const name  = t.title.length > 22 ? t.title.slice(0, 20) + "…" : t.title;
+    return `<div class="selected-tag" data-tag-idx="${i}">
+      <span class="tag-type ${cls}">${label}</span>
+      <span style="overflow:hidden;text-overflow:ellipsis;flex:1">${name}</span>
+      <button class="tag-remove" data-idx="${i}" title="Remove">✕</button>
+    </div>`;
+  }).join("");
+
+  tagsEl.querySelectorAll(".tag-remove").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.idx);
+      modalSelectedTracks.splice(idx, 1);
+      renderModalSelectedTags();
+      renderModalLocalPicker();   // refresh checkmarks
+      // Refresh YT results "added" state
+      const q = document.getElementById("modal-yt-search").value.trim();
+      if (q) doModalSearch(q);
+    });
+  });
+}
+
+// ── YouTube search inside new-playlist modal ──────────────────────────────────
 let modalSearchTimeout = null;
 
 document.getElementById("modal-yt-search").addEventListener("input", () => {
@@ -598,7 +659,7 @@ async function doModalSearch(query) {
     const videoId = v.id.videoId;
     const alreadyAdded = modalSelectedTracks.some(t => t.videoId === videoId);
     return `
-      <div class="modal-yt-result-item ${alreadyAdded ? "already-added" : ""}" 
+      <div class="modal-yt-result-item ${alreadyAdded ? "already-added" : ""}"
         data-videoid="${videoId}"
         data-title="${title.replace(/"/g, "&quot;")}"
         data-artist="${channel.replace(/"/g, "&quot;")}"
@@ -612,59 +673,22 @@ async function doModalSearch(query) {
       </div>`;
   }).join("");
 
-  // Add click handlers
   resultsEl.querySelectorAll(".modal-yt-result-item").forEach(item => {
     item.querySelector(".modal-yt-add-btn").addEventListener("click", (e) => {
       e.stopPropagation();
       const { videoid, title, artist, thumb } = item.dataset;
-      const alreadyAdded = modalSelectedTracks.some(t => t.videoId === videoid);
-      if (alreadyAdded) return;
+      if (modalSelectedTracks.some(t => t.videoId === videoid)) return;
       modalSelectedTracks.push({ type: "yt", videoId: videoid, title, artist, thumb });
       item.classList.add("already-added");
       item.querySelector(".modal-yt-add-btn").textContent = "✓ Added";
       item.querySelector(".modal-yt-add-btn").classList.add("added");
-      renderModalSelectedList();
+      renderModalSelectedTags();
       showToast(`Added: ${title}`);
     });
   });
 }
 
-function renderModalSelectedList() {
-  const section = document.getElementById("modal-selected-section");
-  const list = document.getElementById("modal-selected-list");
-  const count = document.getElementById("modal-selected-count");
-
-  if (!modalSelectedTracks.length) { section.style.display = "none"; return; }
-  section.style.display = "block";
-  count.textContent = modalSelectedTracks.length;
-
-  list.innerHTML = modalSelectedTracks.map((t, i) => {
-    const title = t.type === "yt" ? t.title : (songs[t.index]?.title || "Unknown");
-    const artist = t.type === "yt" ? t.artist : (songs[t.index]?.artist || "Unknown");
-    return `
-      <div class="picker-item" data-idx="${i}">
-        <span class="sr-badge yt-badge" style="font-size:9px;padding:1px 6px;flex-shrink:0">YT</span>
-        <div class="picker-item-info" style="flex:1;min-width:0">
-          <div class="picker-title">${title}</div>
-          <div class="picker-artist">${artist}</div>
-        </div>
-        <button class="modal-remove-btn" data-idx="${i}" title="Remove">✕</button>
-      </div>`;
-  }).join("");
-
-  list.querySelectorAll(".modal-remove-btn").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const idx = parseInt(btn.dataset.idx);
-      modalSelectedTracks.splice(idx, 1);
-      renderModalSelectedList();
-      // Re-render search results to update "Added" state
-      const q = document.getElementById("modal-yt-search").value.trim();
-      if (q) doModalSearch(q);
-    });
-  });
-}
-
+// ── Modal close ───────────────────────────────────────────────────────────────
 document.getElementById("modal-close").addEventListener("click", closePlaylistModal);
 document.getElementById("modal-cancel").addEventListener("click", closePlaylistModal);
 playlistModal.addEventListener("click", (e) => { if (e.target === playlistModal) closePlaylistModal(); });
@@ -680,6 +704,15 @@ document.getElementById("modal-create").addEventListener("click", () => {
   closePlaylistModal();
   showToast(`✅ Playlist "${name}" created with ${modalSelectedTracks.length} songs!`);
   addAIMessage(`✅ Playlist "${name}" with ${modalSelectedTracks.length} song(s) created!`);
+});
+
+// ─── Emoji picker ─────────────────────────────────────────────────────────────
+document.getElementById("emoji-row").addEventListener("click", (e) => {
+  const opt = e.target.closest(".emoji-opt");
+  if (!opt) return;
+  document.querySelectorAll(".emoji-opt").forEach(x => x.classList.remove("selected"));
+  opt.classList.add("selected");
+  selectedEmoji = opt.dataset.emoji;
 });
 
 // ─── Preset playlist cards ────────────────────────────────────────────────────
@@ -698,22 +731,25 @@ document.getElementById("user-playlist-grid").addEventListener("click", (e) => {
     if (matchEmoji) matchEmoji.classList.add("selected");
     document.getElementById("modal-yt-search").value = "";
     document.getElementById("modal-yt-results").innerHTML = "";
-    renderModalSelectedList();
+    switchModalTab("local");
+    renderModalLocalPicker();
+    renderModalSelectedTags();
     playlistModal.classList.add("open");
   }
 });
 
-// ─── Playlist Detail Modal ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── PLAYLIST DETAIL MODAL — with Local + YouTube tabs ───────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
 const detailModal = document.getElementById("playlist-detail-modal");
-
-let detailCurrentPlaylist = null;   // name of playlist open in detail modal
-let detailSortMode = "default";     // current sort: default | title | artist | reverse
+let detailCurrentPlaylist = null;
+let detailSortMode = "default";
 let detailYTSearchTimeout = null;
 
 function getDetailTracks(name) {
   const pl = playlists[name];
   if (!pl) return [];
-  const tracks = [...pl.tracks]; // work on a copy for display
+  const tracks = [...pl.tracks];
   if (detailSortMode === "title") {
     tracks.sort((a, b) => {
       const ta = (a.type === "local" ? songs[a.index]?.title : a.title) || "";
@@ -737,20 +773,20 @@ function renderDetailSongList(name) {
   const list = document.getElementById("detail-song-list");
   const displayTracks = getDetailTracks(name);
 
-  // Update count
   const countEl = document.querySelector("#playlist-detail-info .detail-count");
   if (countEl) countEl.textContent = `${pl.tracks.length} song${pl.tracks.length !== 1 ? "s" : ""}`;
 
   if (!displayTracks.length) {
-    list.innerHTML = `<div class="song-list-empty">No songs yet. Search below to add some!</div>`;
+    list.innerHTML = `<div class="song-list-empty">No songs yet. Add some below!</div>`;
     return;
   }
 
   list.innerHTML = displayTracks.map((track, pos) => {
-    const title = track.type === "local" ? (songs[track.index]?.title || "Unknown") : track.title;
+    const title  = track.type === "local" ? (songs[track.index]?.title  || "Unknown") : track.title;
     const artist = track.type === "local" ? (songs[track.index]?.artist || "Unknown") : track.artist;
-    const badge = track.type === "yt" ? `<span class="sr-badge yt-badge" style="font-size:9px;padding:1px 5px;margin-left:6px">YT</span>` : "";
-    // Store original index for removal (we need to remove from pl.tracks, not sorted copy)
+    const badge  = track.type === "yt"
+      ? `<span class="sr-badge yt-badge" style="font-size:9px;padding:1px 5px;margin-left:6px">YT</span>`
+      : `<span class="sr-badge local-badge" style="font-size:9px;padding:1px 5px;margin-left:6px">Local</span>`;
     const origIdx = pl.tracks.indexOf(track);
     return `<div class="picker-item detail-track-item" data-pos="${pos}" data-orig-idx="${origIdx}" style="cursor:pointer">
       <span style="color:var(--text-muted);font-size:12px;min-width:22px">${pos + 1}</span>
@@ -762,7 +798,6 @@ function renderDetailSongList(name) {
     </div>`;
   }).join("");
 
-  // Play on click
   list.querySelectorAll(".detail-track-item").forEach(item => {
     item.addEventListener("click", (e) => {
       if (e.target.closest(".detail-remove-btn")) return;
@@ -776,13 +811,11 @@ function renderDetailSongList(name) {
     });
   });
 
-  // Remove on ✕
   list.querySelectorAll(".detail-remove-btn").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const origIdx = parseInt(btn.dataset.origIdx);
       pl.tracks.splice(origIdx, 1);
-      // If currently playing this playlist, adjust position
       if (currentPlaylist === name) {
         if (currentPlaylistPos >= pl.tracks.length) currentPlaylistPos = Math.max(0, pl.tracks.length - 1);
       }
@@ -790,6 +823,45 @@ function renderDetailSongList(name) {
       renderAllPlaylists();
       if (typeof refreshHomeUI === "function") refreshHomeUI();
       showToast("Song removed from playlist");
+    });
+  });
+}
+
+// ── Render the local picker inside the detail modal ───────────────────────────
+function renderDetailLocalPicker(name) {
+  const pl = playlists[name];
+  const picker = document.getElementById("detail-local-picker");
+  if (!songs.length) {
+    picker.innerHTML = `<div class="local-song-empty">No local songs uploaded yet.</div>`;
+    return;
+  }
+  picker.innerHTML = songs.map((s, i) => {
+    const alreadyIn = pl.tracks.some(t => t.type === "local" && t.index === i);
+    return `<div class="local-picker-item${alreadyIn ? " selected" : ""}" data-detail-local-idx="${i}">
+      <div class="picker-check">${alreadyIn ? "✓" : ""}</div>
+      <div class="lpi-info" style="overflow:hidden;flex:1;min-width:0">
+        <div class="lpi-title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.title}</div>
+        <div class="lpi-artist" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.artist}</div>
+      </div>
+      ${alreadyIn
+        ? `<span style="font-size:11px;color:var(--blue);flex-shrink:0;font-weight:600">In playlist</span>`
+        : `<button class="modal-yt-add-btn" style="flex-shrink:0">+ Add</button>`
+      }
+    </div>`;
+  }).join("");
+
+  picker.querySelectorAll(".local-picker-item:not(.selected) .modal-yt-add-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const item = btn.closest(".local-picker-item");
+      const idx  = parseInt(item.dataset.detailLocalIdx);
+      if (pl.tracks.some(t => t.type === "local" && t.index === idx)) return;
+      pl.tracks.push({ type: "local", index: idx, title: songs[idx].title, artist: songs[idx].artist });
+      renderDetailSongList(name);
+      renderDetailLocalPicker(name);
+      renderAllPlaylists();
+      if (typeof refreshHomeUI === "function") refreshHomeUI();
+      showToast(`Added: ${songs[idx].title}`);
     });
   });
 }
@@ -807,12 +879,13 @@ function openPlaylistDetail(name) {
       <div class="detail-count">${pl.tracks.length} song${pl.tracks.length !== 1 ? "s" : ""}</div>
     </div>`;
 
-  // Reset sort buttons
   document.querySelectorAll(".detail-sort-bar .sort-btn").forEach(b => {
     b.classList.toggle("active", b.dataset.sort === "default");
   });
 
-  // Reset YT search
+  // Reset add-section tabs to local
+  switchDetailAddTab("local", name);
+
   document.getElementById("detail-yt-search").value = "";
   document.getElementById("detail-yt-results").innerHTML = "";
 
@@ -828,10 +901,15 @@ function openPlaylistDetail(name) {
     };
   });
 
+  // Detail-modal add-section tab switching
+  document.querySelectorAll("[data-detail-tab]").forEach(btn => {
+    btn.onclick = () => switchDetailAddTab(btn.dataset.detailTab, name);
+  });
+
   // YT search to add songs
-  const detailYTSearch = document.getElementById("detail-yt-search");
+  const detailYTSearch  = document.getElementById("detail-yt-search");
   const detailYTResults = document.getElementById("detail-yt-results");
-  const detailYTBtn = document.getElementById("detail-yt-search-btn");
+  const detailYTBtn     = document.getElementById("detail-yt-search-btn");
 
   async function doDetailSearch(query) {
     detailYTResults.innerHTML = `<div class="modal-yt-searching">Searching…</div>`;
@@ -894,7 +972,6 @@ function openPlaylistDetail(name) {
 
   document.getElementById("detail-shuffle").onclick = () => {
     if (!pl.tracks.length) return;
-    // Shuffle the actual playlist tracks
     const shuffled = [...pl.tracks].sort(() => Math.random() - 0.5);
     pl.tracks = shuffled;
     currentPlaylist = name; currentPlaylistPos = 0;
@@ -906,6 +983,14 @@ function openPlaylistDetail(name) {
   };
 
   detailModal.classList.add("open");
+}
+
+function switchDetailAddTab(tab, name) {
+  document.querySelectorAll("[data-detail-tab]").forEach(b =>
+    b.classList.toggle("active", b.dataset.detailTab === tab));
+  document.getElementById("detail-tab-local").classList.toggle("active", tab === "local");
+  document.getElementById("detail-tab-youtube").classList.toggle("active", tab === "youtube");
+  if (tab === "local" && name) renderDetailLocalPicker(name);
 }
 
 document.getElementById("detail-modal-close").addEventListener("click", () => detailModal.classList.remove("open"));
@@ -976,6 +1061,63 @@ function addAILoading() {
   return div;
 }
 
+async function callAIWithRetry(body, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch("/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok && attempt < retries) {
+        await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+        continue;
+      }
+      const data = await res.json();
+      // If Gemini returned an error body, retry
+      if (data.error && attempt < retries) {
+        await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+        continue;
+      }
+      return data;
+    } catch (e) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 1200 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
+// Detect intent from plain text when AI forgets the action block
+function detectIntentFallback(text, userMessage) {
+  const msg = userMessage.toLowerCase();
+  const isCreateIntent = /\b(make|create|build|generate|give me|i want)\b/.test(msg) && /\bplaylist\b/.test(msg);
+  const isPlayIntent   = /\b(play|listen to|put on|start)\b/.test(msg) && !/playlist/.test(msg);
+
+  if (isCreateIntent) {
+    // Extract theme words for a generic playlist name
+    const themes = msg.replace(/\b(make|create|build|generate|give me|i want|a|an|the|me|us|playlist|songs?|music|tracks?)\b/g, "").trim();
+    const name = themes.length > 2
+      ? themes.charAt(0).toUpperCase() + themes.slice(1).trim() + " Playlist"
+      : "My Playlist";
+    const defaultSongs = [
+      "top hits 2024 official audio",
+      "best pop songs 2024",
+      "popular music 2024",
+      "trending songs 2024",
+      "hit songs playlist 2024",
+    ];
+    return { type: "CREATE_PLAYLIST", name, emoji: "🎵", songs: defaultSongs };
+  }
+  if (isPlayIntent) {
+    const query = msg.replace(/\b(play|listen to|put on|start|please|can you|could you)\b/g, "").trim();
+    if (query.length > 2) return { type: "PLAY_YOUTUBE", query };
+  }
+  return null;
+}
+
 async function sendToAI(userMessage) {
   addAIMessage(userMessage, true);
   const loader = addAILoading();
@@ -998,65 +1140,94 @@ async function sendToAI(userMessage) {
     ? `Now playing via YouTube: "${titleEl.textContent}" by ${artistEl.textContent}`
     : songs.length ? `Now playing (local): "${songs[songIndex]?.title}" by ${songs[songIndex]?.artist}` : "Nothing playing";
 
+  // Use XML-style tags — much more reliably parsed back from Gemini than backtick blocks
   const systemPrompt = `You are a music assistant in MusiCine, a web music player with YouTube streaming.
 
 Local songs: ${songListText}
 Playlists: ${playlistText}
 ${nowPlaying}
 
-ACTIONS you can trigger (output ONLY ONE action block per response):
+CRITICAL: You MUST always end your response with exactly one <ACTION> block in valid JSON. Never skip it.
 
-Play a single song from YouTube:
-\`\`\`action
-{ "type": "PLAY_YOUTUBE", "query": "song name artist" }
-\`\`\`
+Available actions:
+
+Play a YouTube song:
+<ACTION>{"type":"PLAY_YOUTUBE","query":"artist song name"}</ACTION>
 
 Play a local song by index:
-\`\`\`action
-{ "type": "PLAY_LOCAL", "index": 0 }
-\`\`\`
+<ACTION>{"type":"PLAY_LOCAL","index":0}</ACTION>
 
 Shuffle local library:
-\`\`\`action
-{ "type": "SHUFFLE" }
-\`\`\`
+<ACTION>{"type":"SHUFFLE"}</ACTION>
 
-Show an existing playlist:
-\`\`\`action
-{ "type": "SHOW_PLAYLIST", "name": "Playlist Name" }
-\`\`\`
+Show existing playlist:
+<ACTION>{"type":"SHOW_PLAYLIST","name":"Playlist Name"}</ACTION>
 
-Create a playlist with multiple YouTube songs (use this when user asks to "make", "create", or "build" a playlist):
-\`\`\`action
-{ "type": "CREATE_PLAYLIST", "name": "Playlist Name", "emoji": "🎵", "songs": ["Artist1 - Song1 official audio", "Artist2 - Song2 official audio", "Artist3 - Song3 official audio"] }
-\`\`\`
+Create a playlist (REQUIRED when user says make/create/build/give me a playlist):
+<ACTION>{"type":"CREATE_PLAYLIST","name":"Playlist Name","emoji":"🎵","songs":["Artist - Song 1 official audio","Artist - Song 2 official audio","Artist - Song 3 official audio","Artist - Song 4 official audio","Artist - Song 5 official audio"]}</ACTION>
 
-IMPORTANT RULES:
-- When the user asks to CREATE a playlist (e.g. "make a chill playlist", "create a workout playlist", "build a sad songs playlist"), you MUST use CREATE_PLAYLIST with at least 5 relevant song queries in the "songs" array.
-- For CREATE_PLAYLIST, the "songs" array should contain search queries (not just song names). Include artist name for accuracy.
-- Pick songs that genuinely match the mood/theme the user asks for.
-- For CREATE_PLAYLIST, choose a fitting emoji for the playlist theme.
-- Be friendly, concise, and confirm what you're doing.`;
+RULES:
+1. ALWAYS include an <ACTION> block — this is mandatory, never omit it.
+2. For CREATE_PLAYLIST, always include at least 5 songs that match the requested mood/theme.
+3. For conversational messages with no clear action, use: <ACTION>{"type":"NONE"}</ACTION>
+4. Keep your text reply short and friendly (1-2 sentences max).
+5. Do not include any other JSON or code blocks in your response.`;
 
   try {
-    const res = await fetch("/ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ system: systemPrompt, messages: [{ role: "user", content: userMessage }] }),
+    const data = await callAIWithRetry({
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
     });
-    const data = await res.json();
-    const fullText = data.content?.map(b => b.text || "").join("") || "Sorry, I couldn't respond.";
-    const actionMatch = fullText.match(/```action\s*([\s\S]*?)```/);
-    const displayText = fullText.replace(/```action[\s\S]*?```/g, "").trim();
-    loader.remove();
-    addAIMessage(displayText);
-    if (actionMatch) {
-      try { executeAction(JSON.parse(actionMatch[1].trim())); }
-      catch (e) { console.error("Action parse error", e); }
+
+    const fullText = data.content?.map(b => b.text || "").join("") || "";
+
+    if (!fullText) {
+      loader.remove();
+      addAIMessage("I had trouble responding. Please try again!");
+      return;
     }
-  } catch (err) {
+
+    // Parse <ACTION> block (primary format)
+    let action = null;
+    const actionMatch = fullText.match(/<ACTION>([\s\S]*?)<\/ACTION>/i);
+    if (actionMatch) {
+      try {
+        action = JSON.parse(actionMatch[1].trim());
+      } catch (e) {
+        console.warn("Action JSON parse failed:", actionMatch[1]);
+      }
+    }
+
+    // Also try backtick format as fallback (in case Gemini still uses it)
+    if (!action) {
+      const backtickMatch = fullText.match(/```(?:action|json)?\s*(\{[\s\S]*?\})\s*```/i);
+      if (backtickMatch) {
+        try { action = JSON.parse(backtickMatch[1].trim()); } catch(e) {}
+      }
+    }
+
+    // Strip action block from displayed text
+    const displayText = fullText
+      .replace(/<ACTION>[\s\S]*?<\/ACTION>/gi, "")
+      .replace(/```(?:action|json)?[\s\S]*?```/gi, "")
+      .trim();
+
     loader.remove();
-    addAIMessage("Oops! Couldn't reach the AI. Make sure the server is running. 🔌");
+    if (displayText) addAIMessage(displayText);
+
+    // If AI forgot to include an action block, use intent fallback
+    if (!action || action.type === "NONE") {
+      action = detectIntentFallback(displayText || fullText, userMessage);
+    }
+
+    if (action && action.type !== "NONE") {
+      await executeAction(action);
+    }
+
+  } catch (err) {
+    console.error("AI error:", err);
+    loader.remove();
+    addAIMessage("Couldn't reach the AI right now. Check your connection and try again! 🔌");
   } finally {
     aiInput.disabled = false; aiSend.disabled = false; aiInput.focus();
   }
@@ -1099,54 +1270,29 @@ async function executeAction(action) {
       if (playlists[action.name]) openPlaylistDetail(action.name);
       break;
 
-    // ── NEW: Create playlist by searching YouTube for each song ──────────────
     case "CREATE_PLAYLIST": {
       const name = action.name || "AI Playlist";
       const emoji = action.emoji || "🎵";
       const songQueries = action.songs || [];
-
-      if (!songQueries.length) {
-        addAIMessage("I couldn't figure out which songs to add. Try being more specific!");
-        break;
-      }
-      if (playlists[name]) {
-        addAIMessage(`A playlist called "${name}" already exists! Ask me to make one with a different name.`);
-        break;
-      }
-
+      if (!songQueries.length) { addAIMessage("I couldn't figure out which songs to add. Try being more specific!"); break; }
+      if (playlists[name]) { addAIMessage(`A playlist called "${name}" already exists! Ask me to make one with a different name.`); break; }
       showToast(`🔍 Building "${name}"…`);
       addAIMessage(`⏳ Searching YouTube for ${songQueries.length} songs, please wait…`);
-
       const tracks = [];
       for (const query of songQueries) {
         try {
           const results = await searchYouTube(query);
           if (results && results.length) {
             const v = results[0];
-            tracks.push({
-              type: "yt",
-              videoId: v.id.videoId,
-              title: v.snippet.title,
-              artist: v.snippet.channelTitle,
-              thumb: v.snippet.thumbnails?.default?.url || "",
-            });
+            tracks.push({ type: "yt", videoId: v.id.videoId, title: v.snippet.title, artist: v.snippet.channelTitle, thumb: v.snippet.thumbnails?.default?.url || "" });
           }
-        } catch (e) {
-          console.error("Failed to search for:", query, e);
-        }
+        } catch (e) { console.error("Failed to search for:", query, e); }
       }
-
-      if (!tracks.length) {
-        addAIMessage("Couldn't find any songs on YouTube. Try a different playlist theme!");
-        break;
-      }
-
+      if (!tracks.length) { addAIMessage("Couldn't find any songs on YouTube. Try a different playlist theme!"); break; }
       playlists[name] = { icon: emoji, tracks };
       renderAllPlaylists();
       showToast(`✅ "${name}" created with ${tracks.length} songs!`);
       addAIMessage(`✅ Created playlist "${name}" ${emoji} with ${tracks.length} songs! Open it from Your Playlists or say "show ${name}".`);
-
-      // Trigger home UI refresh if available
       if (typeof refreshHomeUI === "function") refreshHomeUI();
       break;
     }

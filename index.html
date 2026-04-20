@@ -3,13 +3,130 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="shortcut icon" href="img/app.jpg" type="image/x-icon">
+    <link rel="icon" href="img/app.jpg" type="image/x-icon">
     <title>MusiCine</title>
     <script src="https://cdn.jsdelivr.net/npm/jsmediatags@3.9.7/dist/jsmediatags.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css" />
+    <style>
+      /* ── Modal Tabs ─────────────────────────────────────────────── */
+      .modal-tabs {
+        display: flex;
+        gap: 0;
+        margin-bottom: 18px;
+        border-bottom: 1.5px solid var(--border);
+      }
+      .modal-tab-btn {
+        flex: 1;
+        background: none;
+        border: none;
+        border-bottom: 2.5px solid transparent;
+        margin-bottom: -1.5px;
+        color: var(--text-muted);
+        font-family: 'Outfit', sans-serif;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 10px 0;
+        cursor: pointer;
+        transition: all 0.18s;
+        letter-spacing: -0.1px;
+      }
+      .modal-tab-btn:hover { color: var(--text); }
+      .modal-tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
+
+      .modal-tab-panel { display: none; }
+      .modal-tab-panel.active { display: block; }
+
+      .local-song-picker {
+        border: 1px solid var(--border);
+        border-radius: var(--r-md);
+        overflow-y: auto;
+        max-height: 240px;
+        background: var(--surface);
+      }
+      .local-song-picker::-webkit-scrollbar { width: 3px; }
+      .local-song-picker::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 2px; }
+
+      .local-song-empty {
+        text-align: center;
+        color: var(--text-muted);
+        padding: 32px 20px;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .local-picker-item {
+        display: flex;
+        align-items: center;
+        padding: 10px 14px;
+        gap: 10px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: background 0.15s;
+        border-bottom: 1px solid var(--border);
+      }
+      .local-picker-item:last-child { border-bottom: none; }
+      .local-picker-item:hover { background: var(--surface2); }
+      .local-picker-item.selected { background: var(--blue-subtle); }
+      .local-picker-item .picker-check {
+        width: 18px; height: 18px;
+        border: 2px solid var(--border2);
+        border-radius: 5px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 11px; flex-shrink: 0;
+        transition: all 0.15s;
+      }
+      .local-picker-item.selected .picker-check {
+        background: var(--blue-dim);
+        border-color: var(--blue-dim);
+        color: #fff;
+      }
+      .local-picker-item .lpi-info .lpi-title { font-weight: 600; font-size: 13px; letter-spacing: -0.1px; }
+      .local-picker-item .lpi-info .lpi-artist { font-size: 11.5px; color: var(--text-sub); margin-top: 1px; }
+
+      .modal-selected-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .selected-tag {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--surface3);
+        border: 1px solid var(--border2);
+        border-radius: 20px;
+        padding: 4px 10px 4px 8px;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: var(--text-sub);
+        max-width: 180px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .selected-tag .tag-type {
+        font-size: 9px;
+        font-weight: 800;
+        padding: 1px 5px;
+        border-radius: 6px;
+        flex-shrink: 0;
+        letter-spacing: 0.5px;
+        text-transform: uppercase;
+      }
+      .selected-tag .tag-type.local { background: var(--surface2); color: var(--text-muted); }
+      .selected-tag .tag-type.yt    { background: #ff2020; color: #fff; }
+      .selected-tag .tag-remove {
+        background: none; border: none; color: var(--text-muted);
+        cursor: pointer; font-size: 12px; padding: 0 0 0 2px; line-height: 1;
+        flex-shrink: 0;
+        transition: color 0.15s;
+      }
+      .selected-tag .tag-remove:hover { color: #ff5555; }
+    </style>
   </head>
   <body>
 
@@ -130,15 +247,33 @@
             <span class="emoji-opt" data-emoji="😢">😢</span>
             <span class="emoji-opt" data-emoji="🧠">🧠</span>
           </div>
-          <p class="modal-hint">Search YouTube to add songs:</p>
-          <div class="modal-yt-search-wrap">
-            <input type="text" id="modal-yt-search" placeholder="e.g. Blinding Lights, Kesariya…" autocomplete="off" />
-            <button class="modal-yt-search-btn" id="modal-yt-search-btn">Search</button>
+
+          <!-- TABS -->
+          <div class="modal-tabs">
+            <button class="modal-tab-btn active" data-tab="local">📁 Local Songs</button>
+            <button class="modal-tab-btn" data-tab="youtube">▶ Search YouTube</button>
           </div>
-          <div class="modal-yt-results" id="modal-yt-results"></div>
-          <div id="modal-selected-section" style="display:none">
-            <p class="modal-hint" style="margin-top:14px">Added (<span id="modal-selected-count">0</span>):</p>
-            <div class="modal-song-picker" id="modal-selected-list"></div>
+
+          <!-- LOCAL TAB -->
+          <div class="modal-tab-panel active" id="tab-local">
+            <div class="local-song-picker" id="local-song-picker">
+              <div class="local-song-empty">Upload songs first to add them here.</div>
+            </div>
+          </div>
+
+          <!-- YOUTUBE TAB -->
+          <div class="modal-tab-panel" id="tab-youtube">
+            <div class="modal-yt-search-wrap">
+              <input type="text" id="modal-yt-search" placeholder="e.g. Blinding Lights, Kesariya…" autocomplete="off" />
+              <button class="modal-yt-search-btn" id="modal-yt-search-btn">Search</button>
+            </div>
+            <div class="modal-yt-results" id="modal-yt-results"></div>
+          </div>
+
+          <!-- SELECTED SONGS (shared, always visible) -->
+          <div id="modal-selected-section" style="display:none; margin-top:16px;">
+            <p class="modal-hint">Added (<span id="modal-selected-count">0</span>):</p>
+            <div class="modal-selected-tags" id="modal-selected-tags"></div>
           </div>
         </div>
         <div class="modal-footer">
@@ -169,14 +304,27 @@
 
           <div class="modal-song-picker" id="detail-song-list"></div>
 
-          <!-- Add songs section -->
+          <!-- Add songs section — tabbed -->
           <div class="detail-add-section">
             <p class="modal-hint" style="margin-bottom:10px">Add more songs:</p>
-            <div class="modal-yt-search-wrap">
-              <input type="text" id="detail-yt-search" placeholder="Search YouTube to add songs…" autocomplete="off" />
-              <button class="modal-yt-search-btn" id="detail-yt-search-btn">Search</button>
+            <div class="modal-tabs" style="margin-bottom:12px">
+              <button class="modal-tab-btn active" data-detail-tab="local">📁 Local</button>
+              <button class="modal-tab-btn" data-detail-tab="youtube">▶ YouTube</button>
             </div>
-            <div class="modal-yt-results" id="detail-yt-results"></div>
+            <!-- detail local tab -->
+            <div class="modal-tab-panel active" id="detail-tab-local">
+              <div class="local-song-picker" id="detail-local-picker">
+                <div class="local-song-empty">No local songs uploaded yet.</div>
+              </div>
+            </div>
+            <!-- detail youtube tab -->
+            <div class="modal-tab-panel" id="detail-tab-youtube">
+              <div class="modal-yt-search-wrap">
+                <input type="text" id="detail-yt-search" placeholder="Search YouTube to add songs…" autocomplete="off" />
+                <button class="modal-yt-search-btn" id="detail-yt-search-btn">Search</button>
+              </div>
+              <div class="modal-yt-results" id="detail-yt-results"></div>
+            </div>
           </div>
         </div>
         <div class="modal-footer">
@@ -256,18 +404,13 @@
         document.getElementById("show-all-btn").click();
       });
 
-      // ── Hero stats + library section: update whenever songs/playlists change ─
-      // We patch the functions that mutate songs/playlists to keep the UI in sync.
-      // This runs after script.js is fully parsed, so all globals are available.
-
+      // ── Hero stats + library section ─────────────────────────────────────────
       function refreshHomeUI() {
-        // Stats
         const statSongs = document.getElementById("stat-songs");
         const statPlaylists = document.getElementById("stat-playlists");
         if (statSongs) statSongs.textContent = songs.length;
         if (statPlaylists) statPlaylists.textContent = Object.keys(playlists).length;
 
-        // Local library quick-view section
         const libSection = document.getElementById("library-section");
         const previewGrid = document.getElementById("library-preview-grid");
         if (libSection && previewGrid) {
@@ -296,7 +439,6 @@
           }
         }
 
-        // Playlists section: empty state vs grid
         const emptyState = document.getElementById("playlists-empty");
         const playlistGrid = document.getElementById("user-playlist-grid");
         const customNames = Object.keys(playlists);
@@ -327,7 +469,7 @@
         setTimeout(refreshHomeUI, 50);
       });
 
-      // Initial call (in case page loads with state)
+      // Initial call
       refreshHomeUI();
     </script>
   </body>
